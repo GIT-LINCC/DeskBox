@@ -38,4 +38,9 @@ public sealed partial class FileWidgetSettingsSection : UserControl
     {
         global::DeskBox.App.Current.ShowDesktopOrganizationWindow();
     }
+
+    private void DesignDesktopLayoutButton_Click(object sender, RoutedEventArgs e)
+    {
+        global::DeskBox.App.Current.ShowDesktopLayoutDesignerWindow();
+    }
 }

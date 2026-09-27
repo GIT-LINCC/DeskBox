@@ -132,6 +132,150 @@ public sealed partial class WidgetManager
         return true;
     }
 
+    public async Task ApplyComputedDesktopLayoutAsync(
+        ComputedDesktopLayoutPlan layoutPlan,
+        RectInt32 workArea,
+        double dpiScale)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(
+                () => ApplyComputedDesktopLayoutAsync(layoutPlan, workArea, dpiScale));
+            return;
+        }
+
+        double scale = Math.Max(1.0, dpiScale);
+
+        // 1. Dissolve existing widget groups first so all 12+ buckets can be cleanly rearranged or regrouped
+        try
+        {
+            await DissolveAllWidgetGroupsAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopLayoutDesigner] DissolveAllWidgetGroupsAsync warning: {ex.Message}");
+        }
+
+        // 2. Update persisted X, Y, Width, Height and anchor for every widget in the layout plan
+        foreach (ComputedWidgetBounds bounds in layoutPlan.WidgetBounds)
+        {
+            WidgetConfig? config = FindConfig(bounds.WidgetId);
+            if (config is null)
+            {
+                continue;
+            }
+
+            config.X = Math.Round(bounds.PhysicalX);
+            config.Y = Math.Round(bounds.PhysicalY);
+            config.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
+
+            if (bounds.IsCollapsed)
+            {
+                double expandedLogicalH = bounds.LogicalHeight <= 80 ? 260 : Math.Round(bounds.LogicalHeight);
+                config.Width = Math.Max(210, Math.Round(bounds.LogicalWidth));
+                config.Height = Math.Max(250, expandedLogicalH);
+                config.IsCollapsed = true;
+                WidgetCollapseBehaviorNames.SetOverride(config, WidgetCollapseBehavior.Smart);
+
+                var compactRect = new RectInt32(
+                    (int)Math.Round(bounds.PhysicalX),
+                    (int)Math.Round(bounds.PhysicalY),
+                    Math.Max(160, (int)Math.Round(config.Width * scale)),
+                    Math.Max(40, (int)Math.Round(42 * scale)));
+                WidgetCompactBoundsCalculator.CapturePlacement(config, compactRect);
+
+                var expandedRect = new RectInt32(
+                    (int)Math.Round(bounds.PhysicalX),
+                    (int)Math.Round(bounds.PhysicalY),
+                    Math.Max(180, (int)Math.Round(config.Width * scale)),
+                    Math.Max(220, (int)Math.Round(config.Height * scale)));
+                WidgetPositioningService.CaptureAnchor(config, expandedRect, workArea);
+            }
+            else
+            {
+                double normalLogicalH = bounds.LogicalHeight <= 80 ? 250 : Math.Round(bounds.LogicalHeight);
+                config.Width = Math.Round(bounds.LogicalWidth);
+                config.Height = Math.Max(150, normalLogicalH);
+                config.IsCollapsed = false;
+                config.CompactPlacement = null;
+                WidgetCollapseBehaviorNames.SetOverride(config, WidgetCollapseBehavior.Expanded);
+
+                var physRect = new RectInt32(
+                    (int)Math.Round(bounds.PhysicalX),
+                    (int)Math.Round(bounds.PhysicalY),
+                    Math.Max(160, (int)Math.Round(config.Width * scale)),
+                    Math.Max(140, (int)Math.Round(config.Height * scale)));
+                WidgetPositioningService.CaptureAnchor(config, physRect, workArea);
+            }
+        }
+
+        // 3. Immediately reposition and resize all currently loaded standalone windows
+        foreach (IDesktopWidgetWindow window in GetLoadedDesktopWindows())
+        {
+            try
+            {
+                window.RestoreBoundsForCurrentTopology();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DesktopLayoutDesigner] RestoreBounds error for {window.Config.Name}: {ex.Message}");
+            }
+        }
+
+        // 4. Merge planned multi-tab groups and switch their title bars to flat Tabs
+        if (layoutPlan.TabGroups.Count > 0)
+        {
+            foreach (var (groupTitle, memberIds, _) in layoutPlan.TabGroups)
+            {
+                var validIds = memberIds
+                    .Where(id => FindConfig(id) is { IsDisabled: false })
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                if (validIds.Count < 2)
+                {
+                    continue;
+                }
+
+                string primaryId = validIds[0];
+                for (int i = 1; i < validIds.Count; i++)
+                {
+                    try
+                    {
+                        await MergeWidgetsAsync(validIds[i], primaryId);
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[DesktopLayoutDesigner] MergeWidgetsAsync failed ({validIds[i]} -> {primaryId}): {ex.Message}");
+                    }
+                }
+
+                try
+                {
+                    await SetWidgetGroupNavigationStyleAsync(primaryId, WidgetGroupNavigationStyles.Tabs);
+                    WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(_settingsService.Settings, primaryId);
+                    WidgetConfig? primaryConfig = FindConfig(primaryId);
+                    if (group is not null && primaryConfig is not null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(groupTitle))
+                        {
+                            group.Name = groupTitle;
+                        }
+
+                        CaptureGroupLayout(group, primaryConfig);
+                        ApplyGroupLayoutToMembers(group);
+                        GetLoadedWindow(primaryId)?.RestoreBoundsForCurrentTopology();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[DesktopLayoutDesigner] Post-merge group styling failed for {primaryId}: {ex.Message}");
+                }
+            }
+        }
+
+        await _settingsService.SaveAsync();
+    }
+
     public void NotifyWidgetGroupPresentationSettingsChanged()
     {
         RaiseWidgetGroupsChanged();

@@ -114,6 +114,27 @@ public partial class WidgetViewModel
                 .OrderBy(item => !item.IsFolder)
                 .ThenBy(item => item.Name, NaturalStringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+
+            if (Config.Metadata.TryGetValue("InPlaceDesktopBucket", out string? inPlaceFlag) &&
+                string.Equals(inPlaceFlag, "true", StringComparison.OrdinalIgnoreCase) &&
+                Config.Items.Count > 0)
+            {
+                var allowedFullPaths = Config.Items
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Path))
+                    .Select(entry => entry.Path)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var allowedFileNames = Config.Items
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Path))
+                    .Select(entry => Path.GetFileName(entry.Path))
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                items = items
+                    .Where(item =>
+                        allowedFullPaths.Contains(item.Path) ||
+                        allowedFileNames.Contains(Path.GetFileName(item.Path)))
+                    .ToList();
+            }
         }
         else
         {

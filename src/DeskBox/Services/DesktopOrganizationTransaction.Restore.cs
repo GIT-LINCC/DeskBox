@@ -377,6 +377,22 @@ public sealed partial class DesktopOrganizationTransaction
 
     private async Task RestoreItemsAsync(DesktopOrganizationRecoveryJournal journal, IntPtr ownerWindowHandle)
     {
+        bool hadInPlaceItems = false;
+        foreach (var inPlaceItem in journal.Items.Where(item =>
+                     !item.Completed &&
+                     string.Equals(item.SourcePath, item.DestinationPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            inPlaceItem.RestorePath = inPlaceItem.SourcePath;
+            inPlaceItem.Completed = true;
+            hadInPlaceItems = true;
+        }
+
+        if (hadInPlaceItems)
+        {
+            _recoveryStore.Save(journal);
+            DesktopNativeIconVisibilityHelper.SetNativeDesktopIconsVisible(true);
+        }
+
         var ready = journal.Items.Where(item => !item.Completed && MatchesSnapshot(item.DestinationPath, item)).ToList();
         var batches = ready.Where(item => item.SourceScope == DesktopOrganizationSourceScope.Personal)
             .Select(item => new List<DesktopOrganizationRecoveryItem> { item }).ToList();

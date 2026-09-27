@@ -40,6 +40,18 @@ public partial class App
                 contextMenu,
                 OpenDesktopOrganizationFromTray);
 
+        var designDesktopLayoutItem = new MenuFlyoutItem
+        {
+            Text = "🎨 AI 桌面布局设计师...",
+            Width = TrayMenuItemWidth,
+            Icon = new FontIcon { Glyph = "\uE790" }
+        };
+        designDesktopLayoutItem.Loaded += OnTrayMenuVisualLoaded;
+        designDesktopLayoutItem.Click += async (_, _) =>
+            await RunTraySettingsActionAsync(
+                contextMenu,
+                () => ShowDesktopLayoutDesignerWindow());
+
         var mapFolderItem = new MenuFlyoutItem
         {
             Text = localization.T("Common.NewFolderMapping"),
@@ -94,6 +106,7 @@ public partial class App
 
         _trayCreateWidgetItems.Clear();
         contextMenu.Items.Add(organizeDesktopItem);
+        contextMenu.Items.Add(designDesktopLayoutItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
         foreach (var descriptor in new WidgetContentFactory(LocalizationService).GetCreateEntryDescriptors())
         {

@@ -50,4 +50,31 @@ public partial class App
         ScheduleLightMemoryCleanup(completedHeavyOperation: true);
         ScheduleBackgroundMemoryCleanup("desktop-organization-closed");
     }
+
+    private DesktopLayoutDesignerWindow? _desktopLayoutDesignerWindow;
+
+    public DesktopLayoutDesignerWindow ShowDesktopLayoutDesignerWindow()
+    {
+        CancelBackgroundMemoryCleanup();
+        if (_desktopLayoutDesignerWindow is null)
+        {
+            var window = new DesktopLayoutDesignerWindow();
+            _desktopLayoutDesignerWindow = window;
+            ThemeService.TrackWindow(window);
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_desktopLayoutDesignerWindow, window))
+                {
+                    _desktopLayoutDesignerWindow = null;
+                }
+
+                ScheduleLightMemoryCleanup(completedHeavyOperation: true);
+                ScheduleBackgroundMemoryCleanup("desktop-layout-designer-closed");
+            };
+        }
+
+        _desktopLayoutDesignerWindow.ShowWindow();
+        return _desktopLayoutDesignerWindow;
+    }
 }
+

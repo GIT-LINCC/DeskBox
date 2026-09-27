@@ -31,6 +31,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
     {
         InitializeComponent();
         ApplyStaticLocalization();
+        InitializeAiControls();
         Loaded += TaskView_Loaded;
         Unloaded += TaskView_Unloaded;
         ActualThemeChanged += (_, _) => QueueAppearanceRefresh();
@@ -218,6 +219,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         RefreshButton.Visibility = Visibility.Visible;
         ResultInfo.IsOpen = false;
         SelectionFeedbackInfo.IsOpen = false;
+        AiPlanInsightsPanel.Visibility = Visibility.Collapsed;
         ExecutionProgressPanel.Visibility = Visibility.Collapsed;
         ExecutionProgressBar.Value = 0;
         ExecutionProgressText.Text = string.Empty;
@@ -280,6 +282,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         AbandonRecoveryButton.Content = T("DesktopOrganization.Public.AbandonRestore");
         AbandonUndoButton.Content = T("DesktopOrganization.Public.AbandonRestore");
         DoneButton.Content = T("DesktopOrganization.Window.Done");
+        ApplyAiLocalization();
     }
 
     // The banner counts alone never told users WHICH files kept the restore

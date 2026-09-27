@@ -16,11 +16,11 @@ namespace DeskBox.Views;
 
 public sealed partial class DesktopOrganizationWindow : Window
 {
-    private const int DesiredWidth = 900;
-    private const int DesiredHeight = 680;
-    private const int MinimumWidth = 600;
-    private const int MinimumHeight = 500;
-    private const int WorkAreaMargin = 64;
+    private const int DesiredWidth = 1260;
+    private const int DesiredHeight = 840;
+    private const int MinimumWidth = 960;
+    private const int MinimumHeight = 620;
+    private const int WorkAreaMargin = 48;
     private const uint WmGetMinMaxInfo = 0x0024;
     private const uint WmNcDestroy = 0x0082;
     private static readonly UIntPtr DesktopOrganizationWindowSubclassId = new(1);

@@ -65,8 +65,178 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
                 effectiveRuleCount)
             : T("DesktopOrganization.Status.NoRules");
         _isRefreshing = false;
+        RefreshAiSettingsSection(settingsService);
         RefreshWidgetCards();
         BuildTypeOverview();
+    }
+
+    private readonly DesktopOrganizationAiService _aiSettingsService = new();
+    private bool _isRefreshingAiSettings;
+
+    private void RefreshAiSettingsSection(SettingsService settingsService)
+    {
+        _isRefreshingAiSettings = true;
+        try
+        {
+            var slice = settingsService.Settings.DesktopOrganization;
+
+            SettingsAiModeComboBox.Items.Clear();
+            SettingsAiModeComboBox.Items.Add(new ComboBoxItem { Content = T("DesktopOrganization.Mode.Rule"), Tag = DesktopOrganizationModes.Rule });
+            SettingsAiModeComboBox.Items.Add(new ComboBoxItem { Content = "✨ " + T("DesktopOrganization.Mode.Ai"), Tag = DesktopOrganizationModes.Ai });
+            SettingsAiModeComboBox.SelectedIndex = string.Equals(
+                DesktopOrganizationModes.Normalize(slice.DesktopOrganizationMode),
+                DesktopOrganizationModes.Ai,
+                StringComparison.Ordinal) ? 1 : 0;
+
+            SettingsAiProviderComboBox.Header = T("DesktopOrganization.Ai.ProviderHeader");
+            SettingsAiBaseUrlTextBox.Header = T("DesktopOrganization.Ai.BaseUrlHeader");
+            SettingsAiApiKeyPasswordBox.Header = T("DesktopOrganization.Ai.ApiKeyHeader");
+            SettingsAiApiKeyPasswordBox.PlaceholderText = T("DesktopOrganization.Ai.ApiKeyPlaceholder");
+            SettingsAiModelTextBox.Header = T("DesktopOrganization.Ai.ModelHeader");
+            SettingsAiPromptTextBox.Header = T("DesktopOrganization.Ai.PromptHeader");
+            SettingsAiPromptTextBox.PlaceholderText = T("DesktopOrganization.Ai.PromptPlaceholder");
+            SettingsAiSmartReuseText.Text = T("DesktopOrganization.Ai.Option.SmartReuse");
+            SettingsAiAutoBindRulesText.Text = T("DesktopOrganization.Ai.Option.AutoBindRules");
+            SettingsAiEnableWidgetGroupsText.Text = T("DesktopOrganization.Ai.Option.EnableWidgetGroups");
+            SettingsAiTestButton.Content = T("DesktopOrganization.Ai.TestConnection");
+            SettingsAiSaveButton.Content = T("DesktopOrganization.Ai.SaveConfig");
+
+            SettingsAiProviderComboBox.Items.Clear();
+            int selectedProviderIndex = 0;
+            for (int i = 0; i < DesktopOrganizationAiProviderPresets.All.Count; i++)
+            {
+                var preset = DesktopOrganizationAiProviderPresets.All[i];
+                string name = T(preset.DisplayNameKey);
+                if (string.Equals(name, preset.DisplayNameKey, StringComparison.Ordinal))
+                {
+                    name = preset.DefaultDisplayName;
+                }
+
+                SettingsAiProviderComboBox.Items.Add(new ComboBoxItem { Content = name, Tag = preset.Id });
+                if (string.Equals(preset.Id, slice.DesktopOrganizationAiProviderId, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedProviderIndex = i;
+                }
+            }
+
+            SettingsAiProviderComboBox.SelectedIndex = selectedProviderIndex;
+            SettingsAiBaseUrlTextBox.Text = slice.DesktopOrganizationAiBaseUrl;
+            SettingsAiModelTextBox.Text = slice.DesktopOrganizationAiModel;
+            SettingsAiPromptTextBox.Text = slice.DesktopOrganizationAiCustomPrompt;
+            SettingsAiSmartReuseCheckBox.IsChecked = slice.DesktopOrganizationAiEnableSmartReuse;
+            SettingsAiAutoBindRulesCheckBox.IsChecked = slice.DesktopOrganizationAiAutoBindRules;
+            SettingsAiEnableWidgetGroupsCheckBox.IsChecked = slice.DesktopOrganizationAiEnableWidgetGroups;
+            _ = LoadSettingsStoredApiKeyAsync(slice.DesktopOrganizationAiProviderId);
+        }
+        finally
+        {
+            _isRefreshingAiSettings = false;
+        }
+    }
+
+    private async Task LoadSettingsStoredApiKeyAsync(string providerId)
+    {
+        string? secret = await _aiSettingsService.GetApiKeyAsync(providerId);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (SettingsAiProviderComboBox.SelectedItem is ComboBoxItem item &&
+                string.Equals(item.Tag as string, providerId, StringComparison.OrdinalIgnoreCase))
+            {
+                SettingsAiApiKeyPasswordBox.Password = secret ?? string.Empty;
+            }
+        });
+    }
+
+    private async void SettingsAiModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingAiSettings || global::DeskBox.App.Current?.SettingsService is not { } settingsService)
+        {
+            return;
+        }
+
+        if (SettingsAiModeComboBox.SelectedItem is ComboBoxItem item && item.Tag is string mode)
+        {
+            settingsService.Settings.DesktopOrganization.DesktopOrganizationMode = DesktopOrganizationModes.Normalize(mode);
+            await settingsService.SaveAsync(notifySubscribers: false);
+        }
+    }
+
+    private void SettingsAiProviderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingAiSettings)
+        {
+            return;
+        }
+
+        if (SettingsAiProviderComboBox.SelectedItem is ComboBoxItem item && item.Tag is string providerId)
+        {
+            var preset = DesktopOrganizationAiProviderPresets.GetById(providerId);
+            if (!string.Equals(providerId, DesktopOrganizationAiProviderIds.Custom, StringComparison.OrdinalIgnoreCase))
+            {
+                SettingsAiBaseUrlTextBox.Text = preset.DefaultBaseUrl;
+                SettingsAiModelTextBox.Text = preset.DefaultModel;
+            }
+
+            SettingsAiStatusText.Text = string.Empty;
+            _ = LoadSettingsStoredApiKeyAsync(providerId);
+        }
+    }
+
+    private DesktopOrganizationAiOptions ReadSettingsAiOptions()
+    {
+        string providerId = (SettingsAiProviderComboBox.SelectedItem as ComboBoxItem)?.Tag as string
+                            ?? DesktopOrganizationAiProviderIds.DeepSeek;
+        return new DesktopOrganizationAiOptions
+        {
+            ProviderId = providerId,
+            BaseUrl = SettingsAiBaseUrlTextBox.Text.Trim(),
+            Model = SettingsAiModelTextBox.Text.Trim(),
+            ApiKey = SettingsAiApiKeyPasswordBox.Password,
+            CustomPrompt = SettingsAiPromptTextBox.Text.Trim(),
+            EnableSmartWidgetReuse = SettingsAiSmartReuseCheckBox.IsChecked == true,
+            AutoBindRoutingRules = SettingsAiAutoBindRulesCheckBox.IsChecked == true,
+            EnableWidgetGroupSuggestions = SettingsAiEnableWidgetGroupsCheckBox.IsChecked == true
+        };
+    }
+
+    private async void SettingsAiTestButton_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsAiTestButton.IsEnabled = false;
+        SettingsAiStatusText.Text = T("DesktopOrganization.Ai.TestingConnection");
+        try
+        {
+            var options = ReadSettingsAiOptions();
+            var (success, message) = await _aiSettingsService.TestConnectionAsync(options);
+            SettingsAiStatusText.Text = success
+                ? $"✅ {T("DesktopOrganization.Ai.ConnectionSuccess")} ({message})"
+                : $"❌ {Format("DesktopOrganization.Ai.ConnectionFailed", message)}";
+        }
+        finally
+        {
+            SettingsAiTestButton.IsEnabled = true;
+        }
+    }
+
+    private async void SettingsAiSaveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (global::DeskBox.App.Current?.SettingsService is not { } settingsService)
+        {
+            return;
+        }
+
+        var options = ReadSettingsAiOptions();
+        var slice = settingsService.Settings.DesktopOrganization;
+        slice.DesktopOrganizationAiProviderId = options.ProviderId;
+        slice.DesktopOrganizationAiBaseUrl = options.BaseUrl;
+        slice.DesktopOrganizationAiModel = options.Model;
+        slice.DesktopOrganizationAiCustomPrompt = options.CustomPrompt;
+        slice.DesktopOrganizationAiEnableSmartReuse = options.EnableSmartWidgetReuse;
+        slice.DesktopOrganizationAiAutoBindRules = options.AutoBindRoutingRules;
+        slice.DesktopOrganizationAiEnableWidgetGroups = options.EnableWidgetGroupSuggestions;
+
+        await _aiSettingsService.SaveApiKeyAsync(options.ProviderId, options.ApiKey);
+        await settingsService.SaveAsync(notifySubscribers: false);
+        SettingsAiStatusText.Text = "✅ " + T("DesktopOrganization.Ai.ConfigSaved");
     }
 
     private void RefreshWidgetCards()

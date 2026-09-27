@@ -85,6 +85,11 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         _itemDescription = itemDescription;
         InitializeComponent();
         TitleText.Text = target.SuggestedDisplayName;
+        if (!string.IsNullOrWhiteSpace(target.Description))
+        {
+            GroupDescriptionText.Text = target.Description;
+            GroupDescriptionText.Visibility = Visibility.Visible;
+        }
         AutomationProperties.SetName(GroupCheckBox, target.SuggestedDisplayName);
         ToolTipService.SetToolTip(GroupCheckBox, target.SuggestedDisplayName + "\n" +
             T("DesktopOrganization.Layout.SelectionHelp"));

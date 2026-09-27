@@ -11,6 +11,7 @@ public sealed class DesktopOrganizationCoordinator
     private readonly LocalizationService _localizationService;
     private readonly DesktopOrganizationScanner _scanner;
     private readonly DesktopOrganizationPlanner _planner;
+    private readonly DesktopOrganizationAiService _aiService;
     private readonly DesktopOrganizationPlacementPlanner _placementPlanner = new();
     private readonly DesktopOrganizationTransaction _transaction;
 
@@ -19,7 +20,8 @@ public sealed class DesktopOrganizationCoordinator
         FileService fileService,
         WidgetManager widgetManager,
         OrganizerService organizerService,
-        LocalizationService localizationService)
+        LocalizationService localizationService,
+        DesktopOrganizationAiService? aiService = null)
     {
         _settingsService = settingsService;
         _widgetManager = widgetManager;
@@ -28,10 +30,187 @@ public sealed class DesktopOrganizationCoordinator
         var classifier = new DesktopOrganizationClassifier();
         _scanner = new DesktopOrganizationScanner(classifier);
         _planner = new DesktopOrganizationPlanner(new DesktopOrganizationRuleResolver());
+        _aiService = aiService ?? new DesktopOrganizationAiService();
         _transaction = new DesktopOrganizationTransaction(settingsService, fileService)
         {
             AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions
         };
+    }
+
+    public DesktopOrganizationAiService AiService => _aiService;
+
+    public DesktopOrganizationAiOptions GetCurrentAiOptions()
+    {
+        var slice = _settingsService.Settings.DesktopOrganization;
+        DesktopOrganizationAiService.TryApplyLocalProfileOverrides(slice);
+        return new DesktopOrganizationAiOptions
+        {
+            ProviderId = slice.DesktopOrganizationAiProviderId,
+            BaseUrl = slice.DesktopOrganizationAiBaseUrl,
+            Model = slice.DesktopOrganizationAiModel,
+            CustomPrompt = slice.DesktopOrganizationAiCustomPrompt,
+            EnableSmartWidgetReuse = slice.DesktopOrganizationAiEnableSmartReuse,
+            AutoBindRoutingRules = slice.DesktopOrganizationAiAutoBindRules,
+            EnableWidgetGroupSuggestions = slice.DesktopOrganizationAiEnableWidgetGroups,
+            EnableDeepInspection = slice.DesktopOrganizationAiEnableDeepInspection,
+            EnableWebSearch = slice.DesktopOrganizationAiEnableWebSearch,
+            StorageMode = DesktopOrganizationStorageModes.Normalize(slice.DesktopOrganizationStorageMode)
+        };
+    }
+
+    public async Task SaveAiOptionsAsync(
+        DesktopOrganizationAiOptions options,
+        string? apiKeyToUpdate = null,
+        bool updateApiKey = false)
+    {
+        var slice = _settingsService.Settings.DesktopOrganization;
+        slice.DesktopOrganizationAiProviderId = options.ProviderId;
+        slice.DesktopOrganizationAiBaseUrl = options.BaseUrl?.Trim() ?? string.Empty;
+        slice.DesktopOrganizationAiModel = options.Model?.Trim() ?? string.Empty;
+        slice.DesktopOrganizationAiCustomPrompt = options.CustomPrompt?.Trim() ?? string.Empty;
+        slice.DesktopOrganizationAiEnableSmartReuse = options.EnableSmartWidgetReuse;
+        slice.DesktopOrganizationAiAutoBindRules = options.AutoBindRoutingRules;
+        slice.DesktopOrganizationAiEnableWidgetGroups = options.EnableWidgetGroupSuggestions;
+        slice.DesktopOrganizationAiEnableDeepInspection = options.EnableDeepInspection;
+        slice.DesktopOrganizationAiEnableWebSearch = options.EnableWebSearch;
+        slice.DesktopOrganizationStorageMode = DesktopOrganizationStorageModes.Normalize(options.StorageMode);
+
+        if (updateApiKey)
+        {
+            await _aiService.SaveApiKeyAsync(options.ProviderId, apiKeyToUpdate);
+        }
+
+        await _settingsService.SaveAsync(notifySubscribers: false);
+    }
+
+    public async Task<DesktopOrganizationPlan> BuildAiPlanAsync(
+        DesktopOrganizationAiOptions? optionsOverride = null,
+        bool includePersonalDesktop = true,
+        bool includePublicDesktop = false,
+        bool includeSlowItems = false,
+        IReadOnlyCollection<string>? optionalIncludedPaths = null,
+        IProgress<DesktopOrganizationAiStreamProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        DesktopOrganizationScanResult scan =
+            await _scanner.ScanAsync(includeSlowItems, cancellationToken);
+
+        if (optionalIncludedPaths is { Count: > 0 })
+        {
+            var included = optionalIncludedPaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            scan = new DesktopOrganizationScanResult
+            {
+                DesktopPath = scan.DesktopPath,
+                PublicDesktopPath = scan.PublicDesktopPath,
+                PublicDesktopUnavailable = scan.PublicDesktopUnavailable,
+                Items = scan.Items.Select(item =>
+                    item.CanOptIn && included.Contains(item.SourcePath)
+                        ? item with { ExclusionReason = DesktopOrganizationExclusionReason.None }
+                        : item).ToList()
+            };
+        }
+
+        string root = SettingsService.NormalizeManagedStorageRootPath(
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        var options = optionsOverride ?? GetCurrentAiOptions();
+
+        DesktopOrganizationPlan plan = await _aiService.GenerateAiPlanAsync(
+            scan,
+            root,
+            _settingsService.Settings.WidgetLayout.Widgets,
+            _settingsService.Settings.DesktopOrganization.DesktopOrganizationRules,
+            options,
+            ResolveCategoryName,
+            includePersonalDesktop,
+            includePublicDesktop && !scan.PublicDesktopUnavailable,
+            progress,
+            cancellationToken);
+
+        AssignNonOverlappingBounds(plan);
+        return plan;
+    }
+
+    public async Task<DesktopOrganizationPlan> BuildPlanFromSavedDraftAsync(
+        DesktopOrganizationAiSavedDraft draft,
+        bool includePersonalDesktop = true,
+        bool includePublicDesktop = false,
+        bool includeSlowItems = false,
+        IReadOnlyCollection<string>? optionalIncludedPaths = null,
+        CancellationToken cancellationToken = default)
+    {
+        DesktopOrganizationScanResult scan =
+            await _scanner.ScanAsync(includeSlowItems, cancellationToken);
+
+        var schema = draft.SchemaSnapshot ?? DesktopOrganizationAiService.ParseAiResponseJson(draft.RawResponseJson);
+        var promptMap = DesktopOrganizationAiService.ExtractPromptIndexToNameMap(draft.RawPromptJson);
+        var draftFileNames = new HashSet<string>(promptMap.Values, StringComparer.OrdinalIgnoreCase);
+        foreach (var b in schema.Buckets)
+        {
+            if (b.ItemNames is { Count: > 0 })
+            {
+                foreach (string name in b.ItemNames)
+                {
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        draftFileNames.Add(name.Trim());
+                    }
+                }
+            }
+        }
+
+        var includedPathsSet = optionalIncludedPaths is { Count: > 0 }
+            ? optionalIncludedPaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (includedPathsSet.Count > 0 || draftFileNames.Count > 0)
+        {
+            scan = new DesktopOrganizationScanResult
+            {
+                DesktopPath = scan.DesktopPath,
+                PublicDesktopPath = scan.PublicDesktopPath,
+                PublicDesktopUnavailable = scan.PublicDesktopUnavailable,
+                Items = scan.Items.Select(item =>
+                    item.CanOptIn && (includedPathsSet.Contains(item.SourcePath) || draftFileNames.Contains(item.Name))
+                        ? item with { ExclusionReason = DesktopOrganizationExclusionReason.None }
+                        : item).ToList()
+            };
+        }
+
+        var selectedItems = scan.Items.Select(item =>
+            (item.SourceScope == DesktopOrganizationSourceScope.Public ? includePublicDesktop : includePersonalDesktop)
+                ? item
+                : item with { ExclusionReason = DesktopOrganizationExclusionReason.SourceNotSelected }).ToList();
+
+        var eligibleItems = selectedItems.Where(item => item.IsEligible).ToList();
+        var excludedItems = selectedItems.Where(item => !item.IsEligible).ToList();
+
+        string root = SettingsService.NormalizeManagedStorageRootPath(
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        var options = GetCurrentAiOptions();
+        options.StorageMode = DesktopOrganizationStorageModes.Normalize(draft.StorageMode);
+        DesktopOrganizationPlan plan = DesktopOrganizationAiService.BuildPlanFromAiResponse(
+            scan,
+            root,
+            eligibleItems,
+            excludedItems,
+            _settingsService.Settings.WidgetLayout.Widgets,
+            options,
+            schema,
+            ResolveCategoryName,
+            includePersonalDesktop,
+            includePublicDesktop && !scan.PublicDesktopUnavailable,
+            draft.ThinkingTrace,
+            draft.RawPromptJson,
+            draft.RawResponseJson);
+
+        AssignNonOverlappingBounds(plan);
+        return plan;
     }
 
     public async Task<DesktopOrganizationPlan> BuildPlanAsync(
@@ -141,11 +320,52 @@ public sealed class DesktopOrganizationCoordinator
             SourceItems = previewPlan.SourceItems,
             PublicDesktopUnavailable = previewPlan.PublicDesktopUnavailable,
             StorageRootPath = previewPlan.StorageRootPath,
+            StorageMode = previewPlan.StorageMode,
             Targets = targetsByDestination.Values
                 .Where(target => target.Items.Count > 0)
                 .ToList(),
             ExcludedItems = previewPlan.ExcludedItems
                 .Concat(retainedByChoice)
+                .ToList(),
+            IsAiPlan = previewPlan.IsAiPlan,
+            AiSummary = previewPlan.AiSummary,
+            AiThinkingTrace = previewPlan.AiThinkingTrace,
+            AiRawPromptJson = previewPlan.AiRawPromptJson,
+            AiRawResponseJson = previewPlan.AiRawResponseJson,
+            AiSchemaSnapshot = previewPlan.AiSchemaSnapshot,
+            AiGroupSuggestions = previewPlan.AiGroupSuggestions
+                .Where(g => g.IsSelected)
+                .Select(g =>
+                {
+                    var mappedWidgetIds = g.TargetBucketIds
+                        .Select(bucketId => previewPlan.Targets.FirstOrDefault(t => t.SourceBucketId == bucketId))
+                        .Where(t => t is not null)
+                        .Select(t =>
+                        {
+                            if (selectionByBucket.TryGetValue(t!.SourceBucketId, out var sel) &&
+                                sel.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget &&
+                                !string.IsNullOrWhiteSpace(sel.ExistingWidgetId))
+                            {
+                                return sel.ExistingWidgetId!;
+                            }
+                            return t.TargetWidgetId;
+                        })
+                        .Where(id => targetsByDestination.ContainsKey(id))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+
+                    return new DesktopOrganizationAiGroupSuggestion
+                    {
+                        Id = g.Id,
+                        GroupTitle = g.GroupTitle,
+                        TargetBucketIds = g.TargetBucketIds.ToList(),
+                        TargetWidgetIds = mappedWidgetIds,
+                        TargetDisplayNames = g.TargetDisplayNames.ToList(),
+                        Reason = g.Reason,
+                        IsSelected = g.IsSelected
+                    };
+                })
+                .Where(g => g.TargetWidgetIds.Count >= 2)
                 .ToList()
         };
 
@@ -249,6 +469,45 @@ public sealed class DesktopOrganizationCoordinator
                 await _widgetManager.RefreshFileWidgetAsync(target.TargetWidgetId);
             }
 
+            if (plan.IsAiPlan && plan.AiGroupSuggestions.Count > 0)
+            {
+                var activeWidgetIds = _settingsService.Settings.WidgetLayout.Widgets
+                    .Where(w => !w.IsDisabled)
+                    .Select(w => w.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                foreach (DesktopOrganizationAiGroupSuggestion groupSuggestion in plan.AiGroupSuggestions.Where(g => g.IsSelected))
+                {
+                    var validIds = groupSuggestion.TargetWidgetIds
+                        .Where(activeWidgetIds.Contains)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                    if (validIds.Count < 2)
+                    {
+                        continue;
+                    }
+
+                    string primaryId = validIds[0];
+                    for (int i = 1; i < validIds.Count; i++)
+                    {
+                        try
+                        {
+                            await _widgetManager.MergeWidgetsAsync(validIds[i], primaryId);
+                        }
+                        catch (Exception mergeEx)
+                        {
+                            App.Log($"[DesktopOrganizationAi] Failed to merge widget {validIds[i]} into {primaryId}: {mergeEx.Message}");
+                        }
+                    }
+
+                    await _widgetManager.SetWidgetGroupNavigationStyleAsync(primaryId, WidgetGroupNavigationStyles.Tabs);
+                }
+            }
+            else if (result.CreatedWidgets.Count > 0)
+            {
+                await ApplyLiveBentoLayoutCoreAsync(PreferredLayoutStyle, useAiModel: false);
+            }
+
             return result;
         }
         catch (Exception ex)
@@ -319,9 +578,16 @@ public sealed class DesktopOrganizationCoordinator
 
     private async Task CleanupCreatedTargetsAsync(OrganizationHistoryEntry history)
     {
+        bool restoredInPlace = false;
         foreach (OrganizationHistoryTarget target in history.Targets)
         {
-            if (target.WasCreated && (!Directory.Exists(target.DirectoryPath) ||
+            var widgetConfig = _settingsService.Settings.WidgetLayout.Widgets
+                .FirstOrDefault(w => string.Equals(w.Id, target.WidgetId, StringComparison.Ordinal));
+            bool isInPlaceBucket = widgetConfig is not null &&
+                widgetConfig.Metadata.TryGetValue("InPlaceDesktopBucket", out string? inPlace) &&
+                string.Equals(inPlace, "true", StringComparison.OrdinalIgnoreCase);
+
+            if (target.WasCreated && (isInPlaceBucket || !Directory.Exists(target.DirectoryPath) ||
                 !Directory.EnumerateFileSystemEntries(target.DirectoryPath).Any()))
             {
                 await _widgetManager.RemoveWidgetAsync(
@@ -332,12 +598,24 @@ public sealed class DesktopOrganizationCoordinator
                         rule.TargetWidgetId,
                         target.WidgetId,
                         StringComparison.Ordinal));
-                TryDeleteEmptyDirectory(target.DirectoryPath);
+                if (isInPlaceBucket)
+                {
+                    restoredInPlace = true;
+                }
+                else
+                {
+                    TryDeleteEmptyDirectory(target.DirectoryPath);
+                }
             }
             else
             {
                 await _widgetManager.RefreshFileWidgetAsync(target.WidgetId);
             }
+        }
+
+        if (restoredInPlace)
+        {
+            DesktopNativeIconVisibilityHelper.SetNativeDesktopIconsVisible(true);
         }
 
         await _settingsService.SaveAsync(notifySubscribers: false);
@@ -350,6 +628,59 @@ public sealed class DesktopOrganizationCoordinator
         return string.Equals(localized, key, StringComparison.Ordinal)
             ? categoryId
             : localized;
+    }
+
+    private readonly DesktopLayoutDesignService _layoutDesignService = new();
+
+    public string PreferredLayoutStyle { get; set; } = DesktopLayoutStyles.StudioWings;
+
+    public Task<ComputedDesktopLayoutPlan> DesignAndApplyLiveDesktopLayoutAsync(
+        string layoutStyle,
+        bool useAiModel = true,
+        IProgress<DesktopOrganizationAiStreamProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        PreferredLayoutStyle = DesktopLayoutStyles.Normalize(layoutStyle);
+        return ApplyLiveBentoLayoutCoreAsync(PreferredLayoutStyle, useAiModel, progress, cancellationToken);
+    }
+
+    private async Task<ComputedDesktopLayoutPlan> ApplyLiveBentoLayoutCoreAsync(
+        string layoutStyle,
+        bool useAiModel,
+        IProgress<DesktopOrganizationAiStreamProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        Win32Helper.NativeRect nativeWorkArea = default;
+        if (!Win32Helper.SystemParametersInfo(SpiGetWorkArea, 0, ref nativeWorkArea, 0))
+        {
+            nativeWorkArea = new Win32Helper.NativeRect { Left = 0, Top = 0, Right = 1920, Bottom = 1032 };
+        }
+
+        double scale = Math.Max(1.0, Win32Helper.GetDpiForSystem() / 96d);
+        var workArea = new DesktopOrganizationRect(
+            nativeWorkArea.Left,
+            nativeWorkArea.Top,
+            nativeWorkArea.Right - nativeWorkArea.Left,
+            nativeWorkArea.Bottom - nativeWorkArea.Top);
+        var workAreaInt32 = new Windows.Graphics.RectInt32(
+            nativeWorkArea.Left,
+            nativeWorkArea.Top,
+            nativeWorkArea.Right - nativeWorkArea.Left,
+            nativeWorkArea.Bottom - nativeWorkArea.Top);
+
+        var aiOptions = GetCurrentAiOptions();
+        ComputedDesktopLayoutPlan layoutPlan = await _layoutDesignService.DesignLiveDesktopWithAiAsync(
+            _settingsService.Settings.WidgetLayout.Widgets,
+            workArea,
+            scale,
+            aiOptions,
+            layoutStyle,
+            useAiModel,
+            progress,
+            cancellationToken);
+
+        await _widgetManager.ApplyComputedDesktopLayoutAsync(layoutPlan, workAreaInt32, scale);
+        return layoutPlan;
     }
 
     private void AssignNonOverlappingBounds(DesktopOrganizationPlan plan)
@@ -371,27 +702,13 @@ public sealed class DesktopOrganizationCoordinator
             nativeWorkArea.Top,
             nativeWorkArea.Right - nativeWorkArea.Left,
             nativeWorkArea.Bottom - nativeWorkArea.Top);
-        var occupied = _settingsService.Settings.Widgets
-            .Where(widget => widget.IsVisible && !widget.IsDisabled)
-            .Select(widget => new DesktopOrganizationRect(
-                widget.X,
-                widget.Y,
-                widget.Width * scale,
-                widget.Height * scale))
-            .ToList();
 
-        if (!_placementPlanner.TryAssignBounds(
-                plan,
-                workArea,
-                occupied,
-                _settingsService.Settings.DefaultWidgetWidth * scale,
-                _settingsService.Settings.DefaultWidgetHeight * scale,
-                DesktopOrganizationPlacementPlanner.DefaultEdgeMargin * scale,
-                DesktopOrganizationPlacementPlanner.DefaultGap * scale))
-        {
-            throw new InvalidOperationException(
-                _localizationService.T("DesktopOrganization.Error.NoLayoutSpace"));
-        }
+        DesktopLayoutDesignService.AssignAestheticBoundsToOrganizationPlan(
+            plan,
+            _settingsService.Settings.WidgetLayout.Widgets,
+            workArea,
+            scale,
+            PreferredLayoutStyle);
     }
 
     private static void TryDeleteEmptyDirectory(string path)

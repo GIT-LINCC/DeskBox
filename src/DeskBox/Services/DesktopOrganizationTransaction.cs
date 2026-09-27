@@ -65,31 +65,35 @@ public sealed partial class DesktopOrganizationTransaction
 
             try
             {
-                foreach (DesktopOrganizationTargetPlan target in plan.Targets)
+                if (!plan.IsInPlaceDesktop)
                 {
-                    try
+                    foreach (DesktopOrganizationTargetPlan target in plan.Targets)
                     {
-                        if (!Directory.Exists(target.TargetDirectoryPath))
+                        try
                         {
-                            Directory.CreateDirectory(target.TargetDirectoryPath);
-                            createdDirectories.Add(target.TargetDirectoryPath);
+                            if (!Directory.Exists(target.TargetDirectoryPath))
+                            {
+                                Directory.CreateDirectory(target.TargetDirectoryPath);
+                                createdDirectories.Add(target.TargetDirectoryPath);
+                            }
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            retainedItems.AddRange(target.Items.Select(item =>
+                                CreateRetainedItem(item, ex)));
+                            journal.Items.RemoveAll(item => string.Equals(
+                                item.TargetWidgetId,
+                                target.TargetWidgetId,
+                                StringComparison.Ordinal));
+                            App.Log(
+                                $"[DesktopOrganization] Target unavailable " +
+                                $"widget={target.TargetWidgetId} path={target.TargetDirectoryPath}: {ex}");
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        retainedItems.AddRange(target.Items.Select(item =>
-                            CreateRetainedItem(item, ex)));
-                        journal.Items.RemoveAll(item => string.Equals(
-                            item.TargetWidgetId,
-                            target.TargetWidgetId,
-                            StringComparison.Ordinal));
-                        App.Log(
-                            $"[DesktopOrganization] Target unavailable " +
-                            $"widget={target.TargetWidgetId} path={target.TargetDirectoryPath}: {ex}");
-                    }
+
+                    ReserveDestinations(journal);
                 }
 
-                ReserveDestinations(journal);
                 if (journal.Items.Count > 0)
                 {
                     await _recoveryStore.SaveAsync(journal);
@@ -102,72 +106,125 @@ public sealed partial class DesktopOrganizationTransaction
                         item => item.SourcePath,
                         StringComparer.OrdinalIgnoreCase);
 
-                void RecordCompleted(FileService.FileTransferResult result)
+                if (plan.IsInPlaceDesktop)
                 {
-                    // A cross-volume copy whose source cleanup failed is not a
-                    // completed move, even if the transfer retained a full copy.
-                    if (!FileService.IsCompletedShellMove(result.SourcePath, result.DestinationPath)) return;
-                    var item = journal.Items.First(candidate => string.Equals(
-                        candidate.SourcePath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
-                    if (item.Completed) return;
-                    item.DestinationPath = result.DestinationPath;
-                    item.Completed = true;
-                    RecordDestinationIdentity(item);
-                    _recoveryStore.Save(journal);
-                }
-
-                // Personal files are processed first. One public Shell batch
-                // shares authorization and preserves each completed receipt.
-                var batches = journal.Items
-                    .Where(item => item.SourceScope == DesktopOrganizationSourceScope.Personal)
-                    .Select(item => new List<DesktopOrganizationRecoveryItem> { item }).ToList();
-                var publicItems = journal.Items.Where(item => item.SourceScope == DesktopOrganizationSourceScope.Public).ToList();
-                if (publicItems.Count > 0) batches.Add(publicItems);
-                foreach (var batch in batches)
-                {
-                    var ready = new List<DesktopOrganizationRecoveryItem>();
-                    foreach (var item in batch)
+                    foreach (var item in journal.Items)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         try
                         {
-                            cancellationToken.ThrowIfCancellationRequested();
                             RevalidateSource(snapshotsByPath[item.SourcePath]);
-                            ready.Add(item);
+                            item.DestinationPath = item.SourcePath;
+                            item.Completed = true;
+                            RecordDestinationIdentity(item);
+                            completedCount++;
+                            progress?.Report(new DesktopOrganizationProgress(
+                                completedCount,
+                                totalCount,
+                                item.TargetWidgetId,
+                                plan.Targets.First(target => target.TargetWidgetId == item.TargetWidgetId).SuggestedDisplayName,
+                                item.SourceScope));
                         }
                         catch (Exception ex)
                         {
                             retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath], ex));
                         }
                     }
-                    Exception? failure = null;
-                    if (ready.Count > 0)
+
+                    // Also update existing InPlaceDesktopBucket widgets if items were routed to them
+                    foreach (var target in plan.Targets.Where(t => !t.CreatesWidget))
                     {
-                        if (ready[0].SourceScope == DesktopOrganizationSourceScope.Public)
-                            progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
-                                ready[0].TargetWidgetId, string.Empty, DesktopOrganizationSourceScope.Public));
-                        try
+                        var existingWidget = settings.WidgetLayout.Widgets.FirstOrDefault(w =>
+                            string.Equals(w.Id, target.TargetWidgetId, StringComparison.Ordinal));
+                        if (existingWidget is not null &&
+                            existingWidget.Metadata.TryGetValue("InPlaceDesktopBucket", out string? inPlace) &&
+                            string.Equals(inPlace, "true", StringComparison.OrdinalIgnoreCase))
                         {
-                            var results = await _transfer.MoveAsync(
-                                ready.Select(item => new FileService.FileTransferPlan(item.SourcePath, item.DestinationPath)).ToList(),
-                                ready[0].SourceScope == DesktopOrganizationSourceScope.Public,
-                                ownerWindowHandle, RecordCompleted, cancellationToken);
-                            foreach (var result in results) RecordCompleted(result);
+                            var existingPaths = existingWidget.Items.Select(i => i.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            int nextOrder = existingWidget.Items.Count;
+                            foreach (var snap in target.Items)
+                            {
+                                if (existingPaths.Add(snap.SourcePath))
+                                {
+                                    existingWidget.Items.Add(new WidgetItemConfig
+                                    {
+                                        Path = snap.SourcePath,
+                                        SortOrder = nextOrder++
+                                    });
+                                }
+                            }
                         }
-                        catch (Exception ex)
-                        {
-                            if (ex is FileService.IFileTransferWithCompletedResults partial)
-                                foreach (var result in partial.CompletedResults) RecordCompleted(result);
-                            failure = ex;
-                        }
-                        foreach (var item in ready.Where(item => !item.Completed))
-                            retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath],
-                                failure ?? new IOException("The file was not moved.")));
                     }
-                    completedCount += batch.Count;
-                    var last = batch[^1];
-                    progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
-                        last.TargetWidgetId, plan.Targets.First(target => target.TargetWidgetId == last.TargetWidgetId).SuggestedDisplayName,
-                        last.SourceScope));
+                }
+                else
+                {
+                    void RecordCompleted(FileService.FileTransferResult result)
+                    {
+                        // A cross-volume copy whose source cleanup failed is not a
+                        // completed move, even if the transfer retained a full copy.
+                        if (!FileService.IsCompletedShellMove(result.SourcePath, result.DestinationPath)) return;
+                        var item = journal.Items.First(candidate => string.Equals(
+                            candidate.SourcePath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
+                        if (item.Completed) return;
+                        item.DestinationPath = result.DestinationPath;
+                        item.Completed = true;
+                        RecordDestinationIdentity(item);
+                        _recoveryStore.Save(journal);
+                    }
+
+                    // Personal files are processed first. One public Shell batch
+                    // shares authorization and preserves each completed receipt.
+                    var batches = journal.Items
+                        .Where(item => item.SourceScope == DesktopOrganizationSourceScope.Personal)
+                        .Select(item => new List<DesktopOrganizationRecoveryItem> { item }).ToList();
+                    var publicItems = journal.Items.Where(item => item.SourceScope == DesktopOrganizationSourceScope.Public).ToList();
+                    if (publicItems.Count > 0) batches.Add(publicItems);
+                    foreach (var batch in batches)
+                    {
+                        var ready = new List<DesktopOrganizationRecoveryItem>();
+                        foreach (var item in batch)
+                        {
+                            try
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                RevalidateSource(snapshotsByPath[item.SourcePath]);
+                                ready.Add(item);
+                            }
+                            catch (Exception ex)
+                            {
+                                retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath], ex));
+                            }
+                        }
+                        Exception? failure = null;
+                        if (ready.Count > 0)
+                        {
+                            if (ready[0].SourceScope == DesktopOrganizationSourceScope.Public)
+                                progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
+                                    ready[0].TargetWidgetId, string.Empty, DesktopOrganizationSourceScope.Public));
+                            try
+                            {
+                                var results = await _transfer.MoveAsync(
+                                    ready.Select(item => new FileService.FileTransferPlan(item.SourcePath, item.DestinationPath)).ToList(),
+                                    ready[0].SourceScope == DesktopOrganizationSourceScope.Public,
+                                    ownerWindowHandle, RecordCompleted, cancellationToken);
+                                foreach (var result in results) RecordCompleted(result);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (ex is FileService.IFileTransferWithCompletedResults partial)
+                                    foreach (var result in partial.CompletedResults) RecordCompleted(result);
+                                failure = ex;
+                            }
+                            foreach (var item in ready.Where(item => !item.Completed))
+                                retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath],
+                                    failure ?? new IOException("The file was not moved.")));
+                        }
+                        completedCount += batch.Count;
+                        var last = batch[^1];
+                        progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
+                            last.TargetWidgetId, plan.Targets.First(target => target.TargetWidgetId == last.TargetWidgetId).SuggestedDisplayName,
+                            last.SourceScope));
+                    }
                 }
 
                 DesktopOrganizationPlan committedPlan = CreateCommittedPlan(
@@ -253,6 +310,11 @@ public sealed partial class DesktopOrganizationTransaction
 
                 RemoveEmptyCreatedDirectories(createdDirectories);
 
+                if (plan.IsInPlaceDesktop && completedItems.Count > 0)
+                {
+                    DesktopNativeIconVisibilityHelper.SetNativeDesktopIconsVisible(false);
+                }
+
                 return new DesktopOrganizationExecutionResult
                 {
                     History = history,
@@ -317,14 +379,21 @@ public sealed partial class DesktopOrganizationTransaction
             throw new InvalidOperationException("A drive root cannot be used as the managed storage folder.");
         }
 
-        if (string.Equals(desktop, storage, StringComparison.OrdinalIgnoreCase) ||
-            storage.StartsWith($"{desktop}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+        bool allowDesktopStorage = plan.IsInPlaceDesktop ||
+            string.Equals(plan.StorageMode, DesktopOrganizationStorageModes.DesktopSubfolders, StringComparison.OrdinalIgnoreCase);
+
+        if (!allowDesktopStorage)
         {
-            throw new InvalidOperationException("The managed storage root cannot be the desktop or one of its subfolders.");
+            if (string.Equals(desktop, storage, StringComparison.OrdinalIgnoreCase) ||
+                storage.StartsWith($"{desktop}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The managed storage root cannot be the desktop or one of its subfolders.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(plan.PublicDesktopPath) && FileService.PathsOverlap(storage, plan.PublicDesktopPath))
+                throw new InvalidOperationException("Managed storage overlaps the public desktop.");
         }
 
-        if (!string.IsNullOrWhiteSpace(plan.PublicDesktopPath) && FileService.PathsOverlap(storage, plan.PublicDesktopPath))
-            throw new InvalidOperationException("Managed storage overlaps the public desktop.");
         foreach (var item in plan.Targets.SelectMany(target => target.Items))
         {
             string root = item.SourceScope == DesktopOrganizationSourceScope.Public ? plan.PublicDesktopPath : plan.DesktopPath;
@@ -339,8 +408,9 @@ public sealed partial class DesktopOrganizationTransaction
         foreach (DesktopOrganizationTargetPlan target in plan.Targets)
         {
             string directory = Path.GetFullPath(target.TargetDirectoryPath);
-            if (FileService.PathsOverlap(directory, desktop) ||
-                (!string.IsNullOrWhiteSpace(plan.PublicDesktopPath) && FileService.PathsOverlap(directory, plan.PublicDesktopPath)))
+            if (!allowDesktopStorage &&
+                (FileService.PathsOverlap(directory, desktop) ||
+                 (!string.IsNullOrWhiteSpace(plan.PublicDesktopPath) && FileService.PathsOverlap(directory, plan.PublicDesktopPath))))
             {
                 throw new InvalidOperationException(
                     "An organization target cannot be the desktop or one of its subfolders.");
@@ -366,6 +436,11 @@ public sealed partial class DesktopOrganizationTransaction
         DesktopOrganizationPlan plan,
         Func<string, long>? availableFreeBytesProvider = null)
     {
+        if (plan.IsInPlaceDesktop)
+        {
+            return;
+        }
+
         foreach (var requirement in ComputeRequiredSpaceByDrive(plan))
         {
             long availableFreeBytes = availableFreeBytesProvider is not null
@@ -444,27 +519,56 @@ public sealed partial class DesktopOrganizationTransaction
         DesktopOrganizationPlan plan,
         AppSettings settings)
     {
+        bool isInPlace = plan.IsInPlaceDesktop;
+        bool isDesktopSubfolders = string.Equals(
+            plan.StorageMode,
+            DesktopOrganizationStorageModes.DesktopSubfolders,
+            StringComparison.OrdinalIgnoreCase);
+
+        double dpiScale = Math.Max(1.0, Platform.Win32Helper.GetDpiForSystem() / 96d);
         var created = new List<WidgetConfig>();
         foreach (DesktopOrganizationTargetPlan target in plan.Targets.Where(target => target.CreatesWidget))
         {
-            string managedFolderName = Path.GetRelativePath(plan.StorageRootPath, target.TargetDirectoryPath);
+            string? managedFolderName = isInPlace || isDesktopSubfolders
+                ? null
+                : Path.GetRelativePath(plan.StorageRootPath, target.TargetDirectoryPath);
             var bounds = target.PlannedBounds;
+            double logicalWidth = bounds is { Width: > 100 }
+                ? Math.Round(bounds.Value.Width / dpiScale)
+                : settings.DefaultWidgetWidth;
+            double logicalHeight = bounds is { Height: > 100 }
+                ? Math.Round(bounds.Value.Height / dpiScale)
+                : settings.DefaultWidgetHeight;
+
             var config = new WidgetConfig
             {
                 Id = target.TargetWidgetId,
                 Name = target.SuggestedDisplayName,
                 IsDefaultTitle = false,
                 WidgetKind = WidgetKind.File,
-                MappedFolderPath = target.TargetDirectoryPath,
-                FollowsDefaultStoragePath = true,
+                MappedFolderPath = isInPlace ? plan.DesktopPath : target.TargetDirectoryPath,
+                FollowsDefaultStoragePath = !isInPlace && !isDesktopSubfolders,
                 ManagedFolderName = managedFolderName,
                 BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
-                Width = settings.DefaultWidgetWidth,
-                Height = settings.DefaultWidgetHeight,
+                Width = logicalWidth,
+                Height = logicalHeight,
                 X = bounds?.X ?? 100,
                 Y = bounds?.Y ?? 100,
                 IsVisible = true
             };
+
+            if (isInPlace)
+            {
+                config.Metadata["InPlaceDesktopBucket"] = "true";
+                config.Items = target.Items
+                    .Select((item, idx) => new WidgetItemConfig
+                    {
+                        Path = item.SourcePath,
+                        SortOrder = idx
+                    })
+                    .ToList();
+            }
+
             settings.Widgets.Add(config);
             created.Add(config);
         }
@@ -489,7 +593,9 @@ public sealed partial class DesktopOrganizationTransaction
                     LastWriteTimeUtc = item.LastWriteTimeUtc,
                     SourcePath = item.SourcePath,
                     TargetWidgetId = target.TargetWidgetId,
-                    DestinationPath = Path.Combine(target.TargetDirectoryPath, item.Name)
+                    DestinationPath = plan.IsInPlaceDesktop
+                        ? item.SourcePath
+                        : Path.Combine(target.TargetDirectoryPath, item.Name)
                 }))
                 .ToList()
         };
@@ -510,6 +616,33 @@ public sealed partial class DesktopOrganizationTransaction
     {
         foreach (DesktopOrganizationTargetPlan target in plan.Targets.Where(target => target.CreatesWidget))
         {
+            if (!target.AutoBindRule)
+            {
+                continue;
+            }
+
+            string[] recommendedExtensions = target.RecommendedExtensions
+                .Select(DesktopOrganizationClassifier.NormalizeExtension)
+                .Where(ext => !string.IsNullOrWhiteSpace(ext))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            string[] recommendedCategories = target.RecommendedCategoryIds
+                .Where(categoryId => !string.IsNullOrWhiteSpace(categoryId))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            if (recommendedExtensions.Length > 0 || recommendedCategories.Length > 0)
+            {
+                rules.Add(new DesktopOrganizationRule
+                {
+                    TargetWidgetId = target.TargetWidgetId,
+                    CategoryIds = recommendedCategories.ToList(),
+                    Extensions = recommendedExtensions.ToList()
+                });
+                continue;
+            }
+
             string[] sourceCategories = target.Items
                 .Select(item => item.CategoryId)
                 .Where(categoryId => !string.IsNullOrWhiteSpace(categoryId))

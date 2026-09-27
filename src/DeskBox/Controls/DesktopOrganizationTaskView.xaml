@@ -51,16 +51,22 @@
     </UserControl.Resources>
     <Grid Padding="20,8,20,16" RowSpacing="10" RowDefinitions="Auto,Auto,*,Auto,Auto">
         <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="12,3">
-          <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="4">
+          <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="6">
             <SelectorBar x:Name="PreviewSections" SelectionChanged="PreviewSections_SelectionChanged"
                          VerticalAlignment="Center">
                 <SelectorBarItem x:Name="SummaryTitle" IsSelected="True" />
                 <SelectorBarItem x:Name="ExcludedItemsButton" />
             </SelectorBar>
-            <TextBlock x:Name="SummaryDescription" Grid.Column="1" FontSize="12" Margin="12,0,0,0"
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
+                <ToggleButton x:Name="RuleModeToggleButton" Height="30" Padding="10,0" IsChecked="True"
+                              Click="RuleModeToggleButton_Click" />
+                <ToggleButton x:Name="AiModeToggleButton" Height="30" Padding="10,0"
+                              Click="AiModeToggleButton_Click" />
+            </StackPanel>
+            <TextBlock x:Name="SummaryDescription" Grid.Column="2" FontSize="12" Margin="12,0,0,0"
                        VerticalAlignment="Center" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <ContentControl x:Name="SourceSelectionHost" Grid.Column="2" VerticalAlignment="Center"
+            <ContentControl x:Name="SourceSelectionHost" Grid.Column="3" VerticalAlignment="Center"
                             HorizontalContentAlignment="Stretch">
                 <DropDownButton MinWidth="0" Height="32" Padding="10,0">
                     <TextBlock x:Name="SourceScopeText" />
@@ -80,8 +86,8 @@
                     </DropDownButton.Flyout>
                 </DropDownButton>
             </ContentControl>
-            <Button x:Name="RefreshButton" Grid.Column="3" Height="32" Padding="10,0" Click="RefreshButton_Click" />
-            <Button x:Name="LocationsButton" Grid.Column="4" Height="32" Padding="10,0">
+            <Button x:Name="RefreshButton" Grid.Column="4" Height="32" Padding="10,0" Click="RefreshButton_Click" />
+            <Button x:Name="LocationsButton" Grid.Column="5" Height="32" Padding="10,0">
                 <Button.Flyout>
                     <Flyout x:Name="LocationsFlyout">
                         <StackPanel Spacing="8" MaxWidth="400">
@@ -99,7 +105,7 @@
                     </Flyout>
                 </Button.Flyout>
             </Button>
-            <Button x:Name="MoreButton" Grid.Column="5" Height="32" Padding="8,0">
+            <Button x:Name="MoreButton" Grid.Column="6" Height="32" Padding="8,0">
                 <FontIcon Glyph="&#xE712;" FontSize="16" />
                 <Button.Flyout>
                     <MenuFlyout>
@@ -110,6 +116,137 @@
           </Grid>
         </Border>
         <StackPanel Grid.Row="1" Spacing="6">
+            <Border x:Name="AiControlPanel" Visibility="Collapsed"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="12,10">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <DropDownButton x:Name="AiProviderConfigButton" Height="32" Padding="10,0">
+                            <TextBlock x:Name="AiProviderStatusText" FontSize="12" />
+                            <DropDownButton.Flyout>
+                                <Flyout x:Name="AiConfigFlyout" Placement="BottomEdgeAlignedLeft">
+                                    <StackPanel Spacing="10" Width="340">
+                                        <TextBlock x:Name="AiConfigTitleText" FontWeight="SemiBold" FontSize="14" />
+                                        <ComboBox x:Name="AiProviderComboBox" HorizontalAlignment="Stretch"
+                                                  SelectionChanged="AiProviderComboBox_SelectionChanged" />
+                                        <TextBox x:Name="AiBaseUrlTextBox" />
+                                        <PasswordBox x:Name="AiApiKeyPasswordBox" />
+                                        <TextBox x:Name="AiModelTextBox" />
+                                        <TextBlock x:Name="AiConnectionStatusText" FontSize="12" TextWrapping="Wrap"
+                                                   Visibility="Collapsed" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                            <Button x:Name="AiTestConnectionButton" Click="AiTestConnectionButton_Click" />
+                                            <Button x:Name="AiSaveConfigButton" Style="{StaticResource AccentButtonStyle}"
+                                                    Click="AiSaveConfigButton_Click" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Flyout>
+                            </DropDownButton.Flyout>
+                        </DropDownButton>
+                        <TextBox x:Name="AiCustomPromptTextBox" Grid.Column="1" Height="32"
+                                 KeyDown="AiCustomPromptTextBox_KeyDown" />
+                        <Button x:Name="AiGeneratePlanButton" Grid.Column="2" Height="32" Padding="14,0"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Click="AiGeneratePlanButton_Click" />
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                        <ComboBox x:Name="AiStorageModeComboBox" Grid.Column="0" MinWidth="240" Height="30" FontSize="12"
+                                  SelectionChanged="AiStorageModeComboBox_SelectionChanged" />
+                        <Button x:Name="AiToggleNativeDesktopIconsButton" Grid.Column="1" Height="30" Padding="8,0" FontSize="12"
+                                Click="AiToggleNativeDesktopIconsButton_Click" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Left">
+                            <CheckBox x:Name="AiDeepInspectionCheckBox" Style="{StaticResource NeutralSourceCheckBoxStyle}"
+                                      Checked="AiOptionCheckBox_Changed" Unchecked="AiOptionCheckBox_Changed">
+                                <TextBlock x:Name="AiDeepInspectionText" FontSize="12" />
+                            </CheckBox>
+                            <CheckBox x:Name="AiWebSearchCheckBox" Style="{StaticResource NeutralSourceCheckBoxStyle}"
+                                      Checked="AiOptionCheckBox_Changed" Unchecked="AiOptionCheckBox_Changed">
+                                <TextBlock x:Name="AiWebSearchText" FontSize="12" />
+                            </CheckBox>
+                            <CheckBox x:Name="AiSmartReuseCheckBox" Style="{StaticResource NeutralSourceCheckBoxStyle}"
+                                      Checked="AiOptionCheckBox_Changed" Unchecked="AiOptionCheckBox_Changed">
+                                <TextBlock x:Name="AiSmartReuseText" FontSize="12" />
+                            </CheckBox>
+                            <CheckBox x:Name="AiAutoBindRulesCheckBox" Style="{StaticResource NeutralSourceCheckBoxStyle}"
+                                      Checked="AiOptionCheckBox_Changed" Unchecked="AiOptionCheckBox_Changed">
+                                <TextBlock x:Name="AiAutoBindRulesText" FontSize="12" />
+                            </CheckBox>
+                            <CheckBox x:Name="AiEnableWidgetGroupsCheckBox" Style="{StaticResource NeutralSourceCheckBoxStyle}"
+                                      Checked="AiOptionCheckBox_Changed" Unchecked="AiOptionCheckBox_Changed">
+                                <TextBlock x:Name="AiEnableWidgetGroupsText" FontSize="12" />
+                            </CheckBox>
+                        </StackPanel>
+                    </Grid>
+                    <Border Visibility="Collapsed">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <ComboBox x:Name="AiLayoutStyleComboBox" Visibility="Collapsed" SelectionChanged="AiLayoutStyleComboBox_SelectionChanged" />
+                                <Button x:Name="AiQuickApplyLayoutButton" Visibility="Collapsed" Click="AiQuickApplyLayoutButton_Click" />
+                            </StackPanel>
+                            <Button x:Name="AiDesignLiveDesktopButton" Grid.Column="1" Visibility="Collapsed"
+                                    Click="AiDesignLiveDesktopButton_Click" />
+                        </Grid>
+                    </Border>
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="6">
+                        <TextBlock x:Name="AiDraftsLabelText" Grid.Column="0" VerticalAlignment="Center" FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <ComboBox x:Name="AiSavedDraftsComboBox" Grid.Column="1" HorizontalAlignment="Stretch" Height="30" FontSize="12"
+                                  SelectionChanged="AiSavedDraftsComboBox_SelectionChanged" />
+                        <Button x:Name="AiSaveDraftButton" Grid.Column="2" Height="30" Padding="10,0" FontSize="12"
+                                Click="AiSaveDraftButton_Click" />
+                        <Button x:Name="AiDeleteDraftButton" Grid.Column="3" Height="30" Padding="8,0" FontSize="12"
+                                Click="AiDeleteDraftButton_Click" />
+                        <Button x:Name="AiToggleThinkingButton" Grid.Column="4" Height="30" Padding="10,0" FontSize="12"
+                                Click="AiToggleThinkingButton_Click" />
+                        <Button x:Name="AiToggleDebugButton" Grid.Column="5" Height="30" Padding="10,0" FontSize="12"
+                                Click="AiToggleDebugButton_Click" />
+                    </Grid>
+                    <Border x:Name="AiLiveThinkingPanel" Visibility="Collapsed"
+                            Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="10,8">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                <ProgressRing x:Name="AiThinkingSpinner" Width="14" Height="14" IsActive="False" Visibility="Collapsed" />
+                                <TextBlock x:Name="AiLiveStageText" Grid.Column="1" FontSize="12" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" TextWrapping="Wrap" />
+                                <Button x:Name="AiCollapseThinkingButton" Grid.Column="2" Height="24" Padding="8,0" FontSize="11"
+                                        Content="收起" Click="AiToggleThinkingButton_Click" />
+                            </Grid>
+                            <TextBox x:Name="AiLiveThinkingTextBox" IsReadOnly="True" AcceptsReturn="True"
+                                     TextWrapping="Wrap" MaxHeight="175" FontSize="12"
+                                     FontFamily="Consolas, Microsoft YaHei UI"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="AiDebugInspectorPanel" Visibility="Collapsed"
+                            Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="10,8">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBlock Text="🐞 调试检查器：发送的深层探查上下文 (Prompt JSON) 与 AI 原始返回 (Raw JSON)"
+                                           FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <Button Height="24" Padding="8,0" FontSize="11" Content="关闭调试面板"
+                                        Click="AiToggleDebugButton_Click" />
+                            </Grid>
+                            <TextBox x:Name="AiDebugInspectorTextBox" IsReadOnly="True" AcceptsReturn="True"
+                                     TextWrapping="Wrap" MaxHeight="200" FontSize="11.5"
+                                     FontFamily="Consolas, Microsoft YaHei UI"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="AiPlanInsightsPanel" Visibility="Collapsed"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            CornerRadius="6" Padding="10,8">
+                        <StackPanel Spacing="6">
+                            <TextBlock x:Name="AiSummaryBannerText" FontSize="12" TextWrapping="Wrap" />
+                            <StackPanel x:Name="AiGroupSuggestionsHost" Spacing="4" Visibility="Collapsed" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
             <InfoBar x:Name="SelectionFeedbackInfo" IsClosable="True" IsOpen="False">
                 <InfoBar.ActionButton>
                     <Button x:Name="ViewPendingButton" Click="ViewPendingButton_Click" />

@@ -725,4 +725,30 @@ public class AppSettings
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastUnverifiedUtcTicks"/>
     public long CloudBackupLastUnverifiedUtcTicks { get => CloudBackup.CloudBackupLastUnverifiedUtcTicks; set => CloudBackup.CloudBackupLastUnverifiedUtcTicks = value; }
+
+    // ─── AI Desktop Organization (non-secret provider & feature preferences) ───
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationMode"/>
+    public string DesktopOrganizationMode { get => DesktopOrganization.DesktopOrganizationMode; set => DesktopOrganization.DesktopOrganizationMode = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiProviderId"/>
+    public string DesktopOrganizationAiProviderId { get => DesktopOrganization.DesktopOrganizationAiProviderId; set => DesktopOrganization.DesktopOrganizationAiProviderId = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiBaseUrl"/>
+    public string DesktopOrganizationAiBaseUrl { get => DesktopOrganization.DesktopOrganizationAiBaseUrl; set => DesktopOrganization.DesktopOrganizationAiBaseUrl = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiModel"/>
+    public string DesktopOrganizationAiModel { get => DesktopOrganization.DesktopOrganizationAiModel; set => DesktopOrganization.DesktopOrganizationAiModel = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiCustomPrompt"/>
+    public string DesktopOrganizationAiCustomPrompt { get => DesktopOrganization.DesktopOrganizationAiCustomPrompt; set => DesktopOrganization.DesktopOrganizationAiCustomPrompt = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiEnableSmartReuse"/>
+    public bool DesktopOrganizationAiEnableSmartReuse { get => DesktopOrganization.DesktopOrganizationAiEnableSmartReuse; set => DesktopOrganization.DesktopOrganizationAiEnableSmartReuse = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiAutoBindRules"/>
+    public bool DesktopOrganizationAiAutoBindRules { get => DesktopOrganization.DesktopOrganizationAiAutoBindRules; set => DesktopOrganization.DesktopOrganizationAiAutoBindRules = value; }
+
+    /// <inheritdoc cref="DesktopOrganizationSettingsSlice.DesktopOrganizationAiEnableWidgetGroups"/>
+    public bool DesktopOrganizationAiEnableWidgetGroups { get => DesktopOrganization.DesktopOrganizationAiEnableWidgetGroups; set => DesktopOrganization.DesktopOrganizationAiEnableWidgetGroups = value; }
 }

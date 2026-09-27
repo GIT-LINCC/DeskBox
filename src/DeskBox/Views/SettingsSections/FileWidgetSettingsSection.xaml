@@ -42,6 +42,30 @@
             </Border>
 
             <Border Style="{StaticResource SettingsGroupStyle}">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
+                    <Button Grid.Column="0" Click="DesignDesktopLayoutButton_Click" Style="{StaticResource DrillDownRowStyle}">
+                        <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE790;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" Text="AI 桌面布局设计" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="6 大空间美学流派、额外提示词深度重排、16:9 缩略图零延迟预览与布局方案库" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <Button
+                        Grid.Column="1"
+                        Click="DesignDesktopLayoutButton_Click"
+                        Style="{StaticResource AccentButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="13" Glyph="&#xE790;" />
+                            <TextBlock Text="设计布局" />
+                        </StackPanel>
+                    </Button>
+                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SettingsGroupStyle}">
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="4">
                     <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="FileDisplaySettings">
                         <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">

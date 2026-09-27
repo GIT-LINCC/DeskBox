@@ -141,6 +141,14 @@ public sealed class DesktopOrganizationTargetPlan
 
     public DesktopOrganizationRect? PlannedBounds { get; set; }
 
+    public string? Description { get; init; }
+
+    public List<string> RecommendedCategoryIds { get; init; } = [];
+
+    public List<string> RecommendedExtensions { get; init; } = [];
+
+    public bool AutoBindRule { get; init; } = true;
+
     public DesktopOrganizationTargetPlan CloneWith(
         string targetWidgetId,
         string displayName,
@@ -155,7 +163,11 @@ public sealed class DesktopOrganizationTargetPlan
             TargetDirectoryPath = targetDirectoryPath,
             CreatesWidget = createsWidget,
             Items = items.ToList(),
-            PlannedBounds = PlannedBounds
+            PlannedBounds = PlannedBounds,
+            Description = Description,
+            RecommendedCategoryIds = RecommendedCategoryIds.ToList(),
+            RecommendedExtensions = RecommendedExtensions.ToList(),
+            AutoBindRule = AutoBindRule
         };
 }
 
@@ -204,6 +216,27 @@ public sealed class DesktopOrganizationPlan
     public List<DesktopOrganizationTargetPlan> Targets { get; init; } = [];
 
     public List<DesktopOrganizationFileSnapshot> ExcludedItems { get; init; } = [];
+
+    public bool IsAiPlan { get; init; }
+
+    public string StorageMode { get; init; } = DesktopOrganizationStorageModes.InPlaceDesktop;
+
+    public bool IsInPlaceDesktop => string.Equals(
+        StorageMode,
+        DesktopOrganizationStorageModes.InPlaceDesktop,
+        StringComparison.OrdinalIgnoreCase);
+
+    public string? AiSummary { get; init; }
+
+    public string? AiThinkingTrace { get; init; }
+
+    public string? AiRawPromptJson { get; init; }
+
+    public string? AiRawResponseJson { get; init; }
+
+    public AiOrganizationSchemaResponse? AiSchemaSnapshot { get; init; }
+
+    public List<DesktopOrganizationAiGroupSuggestion> AiGroupSuggestions { get; init; } = [];
 
     public int EligibleItemCount => Targets.Sum(target => target.Items.Count);
 

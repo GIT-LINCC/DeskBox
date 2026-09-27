@@ -469,5 +469,13 @@ public sealed class SettingsSliceContractBaselineTests
         "cloudBackupLastSuccessUtcTicks",
         "cloudBackupLastFailureUtcTicks",
         "cloudBackupLastUnverifiedUtcTicks",
+        "desktopOrganizationMode",
+        "desktopOrganizationAiProviderId",
+        "desktopOrganizationAiBaseUrl",
+        "desktopOrganizationAiModel",
+        "desktopOrganizationAiCustomPrompt",
+        "desktopOrganizationAiEnableSmartReuse",
+        "desktopOrganizationAiAutoBindRules",
+        "desktopOrganizationAiEnableWidgetGroups",
     ];
 }

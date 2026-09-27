@@ -1,4 +1,4 @@
-﻿﻿using DeskBox.Models;
+using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
@@ -1294,6 +1294,12 @@ public sealed partial class WidgetManager
             return false;
         }
 
+        if (existingWidget.Metadata.TryGetValue("InPlaceDesktopBucket", out string? inPlace) &&
+            string.Equals(inPlace, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         if (!FileService.TryIsPathUnderDirectoryResolved(
                 candidatePath,
                 existingWidget.MappedFolderPath,
@@ -2010,11 +2016,28 @@ public sealed partial class WidgetManager
     {
         IReadOnlyList<IDesktopWidgetWindow> windows =
             GetLoadedDesktopWindows();
+        bool healedAny = false;
 
         foreach (IDesktopWidgetWindow window in windows)
         {
             try
             {
+                if (window.Config.Height <= 80)
+                {
+                    window.Config.Height = 260;
+                    if (window.Config.IsCollapsed)
+                    {
+                        WidgetCollapseBehaviorNames.SetOverride(window.Config, WidgetCollapseBehavior.Smart);
+                        var compactRect = new Windows.Graphics.RectInt32(
+                            (int)Math.Round(window.Config.X),
+                            (int)Math.Round(window.Config.Y),
+                            Math.Max(180, (int)Math.Round(window.Config.Width)),
+                            44);
+                        WidgetCompactBoundsCalculator.CapturePlacement(window.Config, compactRect);
+                    }
+                    healedAny = true;
+                }
+
                 window.RestoreBoundsForCurrentTopology();
             }
             catch (Exception ex)
@@ -2023,6 +2046,11 @@ public sealed partial class WidgetManager
                     $"[WidgetManager] Startup bounds reconciliation failed " +
                     $"widget={window.Config.Id}: {ex}");
             }
+        }
+
+        if (healedAny)
+        {
+            _settingsService.SaveDebounced(notifySubscribers: true);
         }
     }
 
@@ -2496,7 +2524,9 @@ public sealed partial class WidgetManager
     private void SyncMappedWidgetShortcut(WidgetConfig config, string? displayNameOverride = null)
     {
         if (config.FollowsDefaultStoragePath ||
-            string.IsNullOrWhiteSpace(config.MappedFolderPath))
+            string.IsNullOrWhiteSpace(config.MappedFolderPath) ||
+            (config.Metadata.TryGetValue("InPlaceDesktopBucket", out string? inPlace) &&
+             string.Equals(inPlace, "true", StringComparison.OrdinalIgnoreCase)))
         {
             RemoveMappedWidgetShortcut(config);
             return;

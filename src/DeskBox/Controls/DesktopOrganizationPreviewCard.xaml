@@ -89,34 +89,35 @@
     <Grid>
         <SystemBackdropElement x:Name="MaterialSurface" IsHitTestVisible="False" />
         <Border x:Name="FallbackSurface" IsHitTestVisible="False" />
-        <Border x:Name="CardOutline" Height="360"
+        <Border x:Name="CardOutline" Height="388"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
             <Grid RowDefinitions="Auto,*,Auto">
-                <Border x:Name="HeaderDivider" BorderThickness="0,0,0,1" Padding="12,8">
-                    <Grid RowDefinitions="Auto,Auto" RowSpacing="6" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <Border x:Name="HeaderDivider" BorderThickness="0,0,0,1" Padding="12,10,12,8">
+                    <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                             <TextBlock x:Name="ReadOnlyTitleText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                        FontWeight="SemiBold" Visibility="Collapsed" />
                             <CheckBox x:Name="GroupCheckBox" MinWidth="0" HorizontalAlignment="Stretch"
-                                      Style="{StaticResource GroupSelectionToggleStyle}"
-                                      Checked="GroupCheckBox_Changed" Unchecked="GroupCheckBox_Changed">
-                                <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" />
+                                       Style="{StaticResource GroupSelectionToggleStyle}"
+                                       Checked="GroupCheckBox_Changed" Unchecked="GroupCheckBox_Changed">
+                                <TextBlock x:Name="TitleText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                             </CheckBox>
                         </Grid>
                         <Border Grid.Row="0" Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                 CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
                             <TextBlock x:Name="CountText" FontSize="12" VerticalAlignment="Center" />
                         </Border>
-                        <Button x:Name="DestinationButton" Grid.Row="1" Grid.ColumnSpan="2" MaxWidth="260" MinWidth="0" MinHeight="32"
-                                FontSize="12" HorizontalAlignment="Left" HorizontalContentAlignment="Stretch">
+                        <TextBlock x:Name="GroupDescriptionText" Grid.Row="1" Grid.ColumnSpan="2" FontSize="11.5" TextWrapping="Wrap"
+                                   MaxLines="3" TextTrimming="CharacterEllipsis" LineHeight="17"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                        <Button x:Name="DestinationButton" Grid.Row="2" Grid.ColumnSpan="2" MaxWidth="280" MinWidth="0" MinHeight="28"
+                                Padding="10,3" FontSize="12" HorizontalAlignment="Left" HorizontalContentAlignment="Stretch">
                             <TextBlock x:Name="DestinationText" TextTrimming="CharacterEllipsis" />
                             <Button.Flyout>
                                 <MenuFlyout x:Name="DestinationFlyout" Placement="Bottom" />
                             </Button.Flyout>
                         </Button>
-                        <TextBlock x:Name="GroupDescriptionText" Grid.Row="1" Grid.ColumnSpan="2" FontSize="12" TextWrapping="Wrap"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
                     </Grid>
                 </Border>
                 <ScrollViewer x:Name="ItemsScrollViewer" Grid.Row="1" Margin="8,6"
